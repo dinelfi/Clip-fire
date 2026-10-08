@@ -1,0 +1,6 @@
+flask
+yt-dlp
+faster-whisper
+anthropic
+gunicorn
+
