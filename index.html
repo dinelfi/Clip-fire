@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clipper · Clips con IA</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --line:#2a2f3a; --txt:#eef0f4; --mut:#9aa3b2; --acc:#ff4d5e; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--txt); }
+  main { max-width:960px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { margin:0 0 4px; font-size:28px; }
+  .sub { color:var(--mut); margin:0 0 24px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; }
+  label { display:block; font-size:13px; color:var(--mut); margin:12px 0 4px; }
+  input[type=text], input[type=number], select { width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--line); background:#0f1115; color:var(--txt); font-size:15px; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .chk { display:flex; gap:8px; align-items:center; margin-top:12px; font-size:14px; color:var(--txt); }
+  button { margin-top:16px; width:100%; padding:12px; border:0; border-radius:8px; background:var(--acc); color:#fff; font-size:16px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  #status { margin-top:20px; color:var(--mut); }
+  #status.err { color:#ff8590; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:14px; margin-top:20px; }
+  .clip { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .clip video { width:100%; display:block; background:#000; aspect-ratio:9/16; object-fit:contain; }
+  .clip div { padding:10px 12px; font-size:13px; }
+  .clip b { display:block; font-size:14px; margin-bottom:4px; }
+  .clip a { color:var(--acc); text-decoration:none; font-weight:600; }
+  .mut { color:var(--mut); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Clipper</h1>
+  <p class="sub">Pega un video de YouTube y la IA saca los mejores clips con subtítulos.</p>
+
+  <div class="card">
+    <label for="url">Link del video</label>
+    <input id="url" type="text" placeholder="https://www.youtube.com/watch?v=...">
+    <div class="row">
+      <div>
+        <label for="n">Cantidad de clips</label>
+        <input id="n" type="number" min="1" max="20" value="10">
+      </div>
+      <div>
+        <label for="lang">Idioma del video</label>
+        <select id="lang">
+          <option value="">Detectar automático</option>
+          <option value="es">Español</option>
+          <option value="en">Inglés</option>
+          <option value="pt">Portugués</option>
+          <option value="fr">Francés</option>
+        </select>
+      </div>
+    </div>
+    <label class="chk"><input id="vert" type="checkbox" checked> Formato vertical 9:16 (TikTok / Reels / Shorts)</label>
+    <label class="chk"><input id="perm" type="checkbox"> Es mi video o tengo permiso del autor para usarlo</label>
+    <button id="go">Generar clips</button>
+    <div id="status"></div>
+  </div>
+
+  <div id="out" class="grid"></div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let timer = null, shown = 0;
+
+function setStatus(msg, err) {
+  $("status").textContent = msg;
+  $("status").className = err ? "err" : "";
+}
+
+function addClip(jid, c) {
+  const d = document.createElement("div");
+  d.className = "clip";
+  const v = document.createElement("video");
+  v.controls = true; v.preload = "metadata";
+  v.src = `/clips/${jid}/${c.file}`;
+  const info = document.createElement("div");
+  const t = document.createElement("b"); t.textContent = c.title;
+  const r = document.createElement("span"); r.className = "mut";
+  r.textContent = `${c.start}s – ${c.end}s · ${c.reason}`;
+  const a = document.createElement("a");
+  a.href = v.src; a.download = c.file; a.textContent = " ⬇ Descargar";
+  const br = document.createElement("div"); br.style.padding = "6px 0 0"; br.appendChild(a);
+  info.append(t, r, br);
+  d.append(v, info);
+  $("out").appendChild(d);
+}
+
+async function poll(jid) {
+  try {
+    const j = await (await fetch(`/api/jobs/${jid}`)).json();
+    setStatus(j.step + (j.title ? ` — ${j.title}` : ""), j.status === "error");
+    while (shown < j.clips.length) addClip(jid, j.clips[shown++]);
+    if (j.status === "running") { timer = setTimeout(() => poll(jid), 2000); return; }
+  } catch (e) {
+    setStatus("Se perdió la conexión con el servidor.", true);
+  }
+  $("go").disabled = false;
+}
+
+$("go").onclick = async () => {
+  const url = $("url").value.trim();
+  if (!url) return setStatus("Pega un link de YouTube.", true);
+  if (!$("perm").checked) return setStatus("Confirma que tienes permiso para usar el video.", true);
+  clearTimeout(timer); shown = 0; $("out").innerHTML = "";
+  $("go").disabled = true; setStatus("Enviando...");
+  const res = await fetch("/api/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url, clips: +$("n").value, lang: $("lang").value, vertical: $("vert").checked })
+  });
+  const j = await res.json();
+  if (!res.ok) { $("go").disabled = false; return setStatus(j.error || "Error", true); }
+  poll(j.id);
+};
+</script>
+</body>
+</html>
